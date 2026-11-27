@@ -314,6 +314,61 @@ class TestListHostsAction:
         assert usage["used"] == 50
         assert usage["total"] == 200
 
+    @pytest.mark.parametrize(
+        ("allowed", "expected_default"),
+        [
+            pytest.param(
+                {"proxy1:volume1": {VFolderHostPermission.CREATE}},
+                "proxy1:volume1",
+                id="create-allowed",
+            ),
+            pytest.param(
+                {
+                    "proxy1:volume1": {
+                        VFolderHostPermission.CREATE,
+                        VFolderHostPermission.MOUNT_IN_SESSION,
+                    }
+                },
+                "proxy1:volume1",
+                id="create-and-mount",
+            ),
+            pytest.param(
+                {"proxy1:volume1": {VFolderHostPermission.MOUNT_IN_SESSION}},
+                None,
+                id="mount-only-no-create",
+            ),
+            pytest.param({"proxy1:volume1": set()}, None, id="no-permissions"),
+            pytest.param(
+                {"proxy2:volume2": {VFolderHostPermission.CREATE}},
+                None,
+                id="default-host-not-allowed",
+            ),
+        ],
+    )
+    async def test_default_host_requires_create_permission(
+        self,
+        vfolder_service: VFolderService,
+        mock_config_provider: MagicMock,
+        mock_vfolder_repository: MagicMock,
+        user_uuid: uuid.UUID,
+        allowed: dict[str, set[VFolderHostPermission]],
+        expected_default: str | None,
+    ) -> None:
+        mock_config_provider.config.volumes.default_host = "proxy1:volume1"
+        mock_vfolder_repository.get_allowed_hosts_for_listing = AsyncMock(
+            return_value=VFolderHostPermissionMap(allowed)
+        )
+        action = SearchHostsAction(
+            user_uuid=user_uuid,
+            domain_name="default",
+            group_id=None,
+            resource_policy={},
+        )
+        result = await vfolder_service.list_hosts(action)
+
+        assert result.default == expected_default
+        assert result.allowed == sorted(allowed)
+
 
 class TestGetQuotaAction:
     async def test_owner_returns_quota_bytes(

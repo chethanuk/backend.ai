@@ -733,7 +733,10 @@ class VFolderService:
         })
 
         default_host = self._config_provider.config.volumes.default_host
-        if default_host not in allowed_hosts:
+        # Only suggest the default host when the user can create vfolders there.
+        if default_host is None or VFolderHostPermission.CREATE not in allowed_hosts.get(
+            default_host, ()
+        ):
             default_host = None
 
         volumes = [
