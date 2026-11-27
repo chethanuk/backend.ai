@@ -23,12 +23,13 @@ from tqdm import tqdm
 from yarl import URL
 
 from ai.backend.client.compat import current_loop
-from ai.backend.client.config import DEFAULT_CHUNK_SIZE, MAX_INFLIGHT_CHUNKS
+from ai.backend.client.config import DEFAULT_CHUNK_SIZE, MAX_INFLIGHT_CHUNKS, get_config
 from ai.backend.client.exceptions import BackendClientError, BackendConnectError
 from ai.backend.client.output.fields import vfolder_fields
 from ai.backend.client.output.types import FieldSpec, PaginatedResult
 from ai.backend.client.pagination import fetch_paginated_result
 from ai.backend.client.request import Request
+from ai.backend.client.session import api_session
 from ai.backend.common.meta.meta import NEXT_RELEASE_VERSION
 from ai.backend.common.types import ResultSet
 
@@ -356,6 +357,16 @@ class VFolderByName(BaseFunction):
         file_unit = "bytes"
         file_mode = "wb"
         file_req_hdrs: dict[str, str] = {}
+        session = api_session.get(None)
+        config = session.config if session is not None else get_config()
+        # Mirror Request.fetch(): no total cap so large downloads are not cut off by
+        # aiohttp's 300s default, but honor the configured connect/read timeouts.
+        timeout = aiohttp.ClientTimeout(
+            total=None,
+            connect=None,
+            sock_connect=config.connection_timeout,
+            sock_read=config.read_timeout,
+        )
         try:
             async for session_attempt in AsyncRetrying(
                 wait=wait_exponential(multiplier=0.02, min=0.02, max=5.0),
@@ -367,7 +378,9 @@ class VFolderByName(BaseFunction):
                         if if_range is not None:
                             file_req_hdrs[hdrs.IF_RANGE] = if_range
                             file_req_hdrs[hdrs.RANGE] = f"{file_unit}={range_start}-"
-                        async with aiohttp.ClientSession(headers=file_req_hdrs) as client:
+                        async with aiohttp.ClientSession(
+                            headers=file_req_hdrs, timeout=timeout
+                        ) as client:
                             async with client.get(download_url) as raw_resp:
                                 match raw_resp.status:
                                     case 200:
