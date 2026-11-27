@@ -1054,7 +1054,20 @@ class BaseRunner(metaclass=ABCMeta):
             if isinstance(cmd, (list, tuple)):
                 exec_func = partial(asyncio.create_subprocess_exec, *map(str, cmd))
             else:
-                exec_func = partial(asyncio.create_subprocess_shell, str(cmd))
+                # Run under the configured SHELL instead of always /bin/sh.
+                shell = self.child_env.get("SHELL", "")
+                shell_path = Path(shell)
+                try:
+                    usable = (
+                        shell_path.is_absolute()
+                        and shell_path.is_file()
+                        and os.access(shell_path, os.X_OK)
+                    )
+                except OSError:  # e.g. SHELL under a directory we cannot search
+                    usable = False
+                if not usable:
+                    shell = "/bin/sh"
+                exec_func = partial(asyncio.create_subprocess_shell, str(cmd), executable=shell)
             pipe_opts: dict[str, Any] = {}
             pipe_opts["stdout"] = asyncio.subprocess.PIPE
             pipe_opts["stderr"] = asyncio.subprocess.PIPE
